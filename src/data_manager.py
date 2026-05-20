@@ -29,7 +29,7 @@ class DataManager:
         self.df_books = pd.read_csv(books_path, sep=',', encoding='latin-1', escapechar='\\', low_memory=False, on_bad_lines='skip')
         self.df_ratings = pd.read_csv(ratings_path, sep=',', encoding='latin-1', escapechar='\\', on_bad_lines='skip')
 
-        # Ujednolicenie nazw kolumn dla wygody
+        # Ujednolicenie nazw kolumn
         self.df_users.columns = ['user_id', 'location', 'age']
         self.df_books.columns = ['isbn', 'title', 'author', 'year', 'publisher', 'img_s', 'img_m', 'img_l']
         self.df_ratings.columns = ['user_id', 'isbn', 'rating']
@@ -40,12 +40,12 @@ class DataManager:
         self.df_users = self.df_users.drop(columns=['age'], errors='ignore')
         self.df_books = self.df_books.drop(columns=['img_s', 'img_m', 'img_l'], errors='ignore')
         self.df_books['year'] = pd.to_numeric(self.df_books['year'], errors='coerce').fillna(0).astype(int)
-        # NIE RUSZAMY df_ratings! Zera zostają jako zera.
+        # Zera w ratings zostają jako zera.
 
     def extract_locations(self) -> None:
         """Rozbija Location na City, Region, Country."""
         print("Rozbijanie lokalizacji...")
-        # Podział stringa "miasto, stan, kraj" na 3 kolumny
+        # Podział stringa "miasto, stan, kraj"
         location_split = self.df_users['location'].str.split(',', n=2, expand=True)
         self.df_users['city'] = location_split[0].str.strip()
         self.df_users['region'] = location_split[1].str.strip() if 1 in location_split else 'unknown'
@@ -92,19 +92,19 @@ class DataManager:
         """Przerzuca dane z Pandas do naszych obiektów systemowych (User, Book, Rating)."""
         print("Populowanie encji systemowych...")
 
-        # Dla Rating używamy zmapowanych indeksów wewnętrznych (user_idx, item_idx)
+        # Zapis Rating
         self.ratings = [
             Rating(user_id=row.user_idx, isbn=row.item_idx, rating=row.rating)
             for row in self.df_ratings.itertuples(index=False)
         ]
 
-        # Zapis Userów (zachowujemy oryginalne ID dla frontendu)
+        # Zapis Userów
         self.users = [
             User(user_id=row.user_id, city=row.city, region=row.region, country=row.country)
             for row in self.df_users.itertuples(index=False)
         ]
 
-        # Zapis Książek (zachowujemy oryginalne ISBN)
+        # Zapis Książek
         self.books = [
             Book(isbn=row.isbn, title=row.title, author=row.author, publisher=row.publisher, year_of_publication=row.year)
             for row in self.df_books.itertuples(index=False)

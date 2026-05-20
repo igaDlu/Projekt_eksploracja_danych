@@ -24,18 +24,15 @@ class HybridRecommender(BaseRecommender):
         self.model_b.fit(ratings)
 
     def predict(self, user_idx: int, item_idx: int) -> float:
-        # Pobieramy predykcje z obu modeli
         pred_a = self.model_a.predict(user_idx, item_idx)
         pred_b = self.model_b.predict(user_idx, item_idx)
 
-        # WYRÓWNANIE SKALI: Node2Vec zwraca [0, 1], a SVD [0, 10]
-        # Jeśli modelem jest Node2Vec, mnożymy jego wynik przez 10, by "ważył" tyle samo co SVD
+        # WYRÓWNANIE SKALI
         if self.model_a.__class__.__name__ == "Node2VecRecommender":
             pred_a *= 10.0
         if self.model_b.__class__.__name__ == "Node2VecRecommender":
             pred_b *= 10.0
 
-        # Zwracamy średnią ważoną obu predykcji
         final_prediction = (pred_a * self.weight_a) + (pred_b * self.weight_b)
         return float(final_prediction)
 
@@ -44,12 +41,9 @@ class HybridRecommender(BaseRecommender):
         self.model_b.rate(user_idx, item_idx, score)
 
     def create_ranking(self, user_idx: int, top_k: int = 10) -> List[Tuple[int, float]]:
-        # Aby stworzyć ranking, musimy wiedzieć, jakich książek użytkownik nie czytał.
-        # Pożyczamy tę wiedzę z modelu A (zakładamy, że SVD lub KNN ma tabele pivot_table)
         if not hasattr(self.model_a, 'pivot_table') or self.model_a.pivot_table is None:
             return []
 
-        # Identyfikacja nieczytanych książek
         if self.kind == "user":
             if user_idx not in self.model_a.pivot_table.index:
                 return []

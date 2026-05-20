@@ -14,27 +14,20 @@ class KNNRecommender(BaseRecommender):
         """
         super().__init__(kind=kind)
         self.n_neighbors = n_neighbors
-        # Używamy miary cosinusowej (podobieństwo kątowe), dokładnie jak w oryginalnym notatniku
         self.model = NearestNeighbors(metric='cosine', algorithm='brute')
         self.pivot_table = None
 
     def fit(self, ratings: List[Rating]) -> None:
-        # 1. Konwersja obiektów Rating na DataFrame
         df = pd.DataFrame([{'user_id': r.user_id, 'isbn': r.isbn, 'rating': r.rating} for r in ratings])
 
-        # 2. Budowa Pivot Table w zależności od trybu
         if self.kind == "user":
-            # Wiersze: Użytkownicy, Kolumny: Książki
             self.pivot_table = df.pivot(index='user_id', columns='isbn', values='rating').fillna(0)
         else:
-            # Wiersze: Książki, Kolumny: Użytkownicy
             self.pivot_table = df.pivot(index='isbn', columns='user_id', values='rating').fillna(0)
 
-        # 3. Trening wyszukiwarki sąsiadów
         self.model.fit(self.pivot_table.values)
 
     def predict(self, user_idx: int, item_idx: int) -> float:
-        # Sprawdzamy, czy tabele istnieją
         if self.pivot_table is None:
             raise ValueError("Model nie został wytrenowany. Wywołaj fit().")
 
@@ -49,7 +42,7 @@ class KNNRecommender(BaseRecommender):
         if self.kind == "user":
             # --- PODEJŚCIE USER-BASED ---
             user_vector = self.pivot_table.loc[user_idx].values.reshape(1, -1)
-            # Wyciągamy sąsiadów (użytkowników). Prosimy o +1, bo pierwszy wynik to ten sam użytkownik
+            # Wyciągamy sąsiadów (użytkowników).
             distances, indices = self.model.kneighbors(user_vector,
                                                        n_neighbors=min(self.n_neighbors + 1, len(self.pivot_table)))
 
@@ -62,7 +55,7 @@ class KNNRecommender(BaseRecommender):
             if np.sum(similarities) == 0:
                 return 0.0
 
-            # Sprawdzamy, jak ci podobni użytkownicy ocenili wybraną książkę (item_idx)
+            # Sprawdzamy, jak podobni użytkownicy ocenili wybraną książkę (item_idx)
             neighbor_ratings = self.pivot_table.loc[neighbor_indices, item_idx].values
 
             # Średnia ważona ocen sąsiadów
@@ -84,7 +77,7 @@ class KNNRecommender(BaseRecommender):
             if np.sum(similarities) == 0:
                 return 0.0
 
-            # Sprawdzamy, jak nasz użytkownik (user_idx) ocenił te sąsiednie, podobne książki
+            # Sprawdzamy, jak nasz użytkownik (user_idx) ocenił sąsiednie książki
             user_ratings_for_neighbors = self.pivot_table.loc[neighbor_indices, user_idx].values
 
             predicted_rating = np.sum(user_ratings_for_neighbors * similarities) / np.sum(similarities)

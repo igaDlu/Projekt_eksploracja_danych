@@ -69,14 +69,9 @@ class Node2VecRecommender(BaseRecommender):
             u_node = f"u_{r.user_id}"
             b_node = f"b_{r.isbn}"
 
-            # NOWOŚĆ: Twój pomysł w praktyce!
-            # Jeśli ocena to 0 (implicit), dajemy wagę 1.0 (słabe powiązanie, ale jest!)
-            # Jeśli ocena > 0, dajemy wagę równą ocenie (silne powiązanie).
             edge_weight = float(r.rating) if r.rating > 0 else 1.0
 
             self.graph.add_edge(u_node, b_node, weight=edge_weight)
-
-        # ... (reszta kodu Word2Vec zostaje bez zmian)
 
         print("Generowanie ścieżek błądzenia losowego (Random Walks)...")
         walks = self._generate_random_walks()
@@ -111,8 +106,6 @@ class Node2VecRecommender(BaseRecommender):
         return float(scaled_score)
 
     def rate(self, user_idx: int, item_idx: int, score: float) -> None:
-        # Pamiętasz naszą rozmowę o przewadze grafów?
-        # Dodanie nowej interakcji w locie to po prostu wrzucenie krawędzi do NetworkX!
         if self.graph is not None:
             self.graph.add_edge(f"u_{user_idx}", f"b_{item_idx}", weight=float(score))
 

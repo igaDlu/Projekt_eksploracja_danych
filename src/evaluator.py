@@ -38,7 +38,7 @@ class Evaluator:
         if dcg == 0.0:
             return 0.0
 
-        # Obliczamy Idealne DCG (IDCG) - czyli przypadek, gdzie wszystkie trafienia były na samym początku rankingu
+        # Idealne DCG (IDCG)
         idcg = 0.0
         actual_hits_count = min(len(actual), k)
         for rank in range(1, actual_hits_count + 1):

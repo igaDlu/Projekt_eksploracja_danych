@@ -32,8 +32,8 @@ def main():
     # 1. Definiujemy silne instancje naszych składowych
     svd_model = SVDRecommender(n_components=12, kind="item")
 
-    # Używamy parametrów wybadanych przez Ciebie (wymiary 8, spacery 50, item-based)
-    n2v_model = Node2VecRecommender(dimensions=8, walk_length=20, num_walks=50, window_size=5, kind="item")
+    # Używamy parametrów wymiary 8, spacery 50, item-based
+    n2v_model = Node2VecRecommender(dimensions=16, walk_length=30, num_walks=50, window_size=5, kind="item")
 
     # 2. Tworzymy Hybrydę (np. 60% głosu ma SVD, 40% Node2Vec)
     hybrid_model = HybridRecommender(model_a=svd_model, model_b=n2v_model, weight_a=0.6)
@@ -63,7 +63,7 @@ def main():
         metrics = evaluator.evaluate(model, test_ratings, top_k=10)
         all_results[model_name] = metrics
 
-    # 6. Ostateczne, czyste podsumowanie wyników w konsoli
+    # 6. Czyste podsumowanie wyników w konsoli
     print("\n" + "=====" * 3 + " OSTATECZNE PORÓWNANIE MODELI BASELINE " + "=====" * 3)
     for model_name, metrics in all_results.items():
         print(f"\nModel: {model_name}")
