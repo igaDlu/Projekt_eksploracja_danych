@@ -1,4 +1,7 @@
-# main.py
+﻿# main.py
+import argparse
+import csv
+import os
 from src.data_manager import DataManager
 from src.recommenders.svd_recommender import SVDRecommender
 from src.recommenders.knn_recommender import KNNRecommender
@@ -7,17 +10,104 @@ from src.recommenders.node2vec_recommender import Node2VecRecommender
 from src.evaluator import Evaluator
 
 
-def main():
-    # 1. Inicjalizacja i wczytanie danych
-    dm = DataManager()
-    # Ścieżki dopasowane do struktury projektu (zakładamy uruchamianie z głównego folderu)
-    dm.load_kaggle_dataset('../data/Users.csv', '../data/Books.csv', '../data/Ratings.csv')
+def parse_arguments():
+    def float_0_1(value):
+        float_value = float(value)
+        if float_value < 0.0 or float_value > 1.0:
+            raise argparse.ArgumentTypeError("Wartość musi być w zakresie 0.0-1.0")
+        return float_value
 
-    # 2. Przetwarzanie i przygotowanie potoku danych (Zgodnie z MVP)
+    parser = argparse.ArgumentParser(
+        description="Porównanie modeli systemu rekomendacji książek przy użyciu SVD, KNN, Node2Vec i hybrydy."
+    )
+    parser.add_argument(
+        "--cutoff",
+        type=int,
+        choices=[10, 50],
+        default=50,
+        help="Wartość odcięcia Top-K dla metryk (HIT@K, MRR@K, NDCG@K)."
+    )
+    parser.add_argument(
+        "--dimension",
+        type=int,
+        choices=[16, 100, 300],
+        default=100,
+        help="Wymiarowość wektorów dla SVD i Node2Vec."
+    )
+    parser.add_argument(
+        "--walk_length",
+        type=int,
+        default=20,
+        help="Długość spaceru losowego dla Node2Vec."
+    )
+    parser.add_argument(
+        "--knn_mode",
+        choices=["item", "user"],
+        default="item",
+        help="Tryb działania KNN: item-based lub user-based."
+    )
+    parser.add_argument(
+        "--knn_neighbors",
+        type=int,
+        choices=[5, 20, 50],
+        default=20,
+        help="Liczba sąsiadów k dla KNN."
+    )
+    parser.add_argument(
+        "--knn_weights",
+        choices=["uniform", "distance"],
+        default="distance",
+        help="Sposób ważenia głosów sąsiadów w KNN."
+    )
+    parser.add_argument(
+        "--svd_mode",
+        choices=["item", "user"],
+        default="item",
+        help="Tryb działania SVD: item-based lub user-based."
+    )
+    parser.add_argument(
+        "--node2vec_mode",
+        choices=["item", "user"],
+        default="item",
+        help="Tryb działania Node2Vec: item-based lub user-based."
+    )
+    parser.add_argument(
+        "--model_to_run",
+        choices=["all", "svd", "knn", "node2vec", "hybrid"],
+        default="all",
+        help="Wybór modelu do uruchomienia."
+    )
+    parser.add_argument(
+        "--hybrid_weight_svd",
+        type=float_0_1,
+        default=0.6,
+        help="Waga komponentu SVD w hybrydowym modelu."
+    )
+    parser.add_argument(
+        "--hybrid_models",
+        nargs=2,
+        choices=["svd", "knn", "node2vec"],
+        default=["svd", "node2vec"],
+        help="Lista dwóch modeli dla HybridRecommender, np. svd node2vec."
+    )
+
+    args = parser.parse_args()
+
+    if len(args.hybrid_models) != 2:
+        parser.error("--hybrid_models musi zawierać dokładnie dwa modele.")
+    if args.hybrid_models[0] == args.hybrid_models[1]:
+        parser.error("--hybrid_models musi zawierać dwa różne modele.")
+
+    return args
+
+
+def main():
+    args = parse_arguments()
+
+    dm = DataManager()
+    dm.load_kaggle_dataset('./data/Users.csv', './data/Books.csv', './data/Ratings.csv')
     dm.clean_metadata()
     dm.extract_locations()
-
-    # Wyższe wartości progowe gwarantują brak szumu i szybkie testowanie modeli
     dm.filter_sparse_data(min_user_ratings=50, min_book_ratings=50)
     dm.encode_ids()
     dm.populate_entities()
@@ -29,21 +119,51 @@ def main():
     # 4. Inicjalizacja Ewaluatora metryk (HIT@10, MRR@10, NDCG@10)
     evaluator = Evaluator()
 
-    # 1. Definiujemy silne instancje naszych składowych
-    svd_model = SVDRecommender(n_components=12, kind="item")
+    svd_model = SVDRecommender(n_components=args.dimension, kind=args.svd_mode)
+    knn_model = KNNRecommender(
+        n_neighbors=args.knn_neighbors,
+        weights=args.knn_weights,
+        kind=args.knn_mode,
+    )
+    node2vec_model = Node2VecRecommender(
+        dimensions=args.dimension,
+        walk_length=args.walk_length,
+        num_walks=50,
+        window_size=5,
+        kind=args.node2vec_mode,
+    )
 
-    # Używamy parametrów wymiary 8, spacery 50, item-based
-    n2v_model = Node2VecRecommender(dimensions=16, walk_length=30, num_walks=50, window_size=5, kind="item")
+    model_map = {
+        "svd": svd_model,
+        "knn": knn_model,
+        "node2vec": node2vec_model,
+    }
 
-    # 2. Tworzymy Hybrydę (np. 60% głosu ma SVD, 40% Node2Vec)
-    hybrid_model = HybridRecommender(model_a=svd_model, model_b=n2v_model, weight_a=0.6)
+    hybrid_models = [name.lower() for name in args.hybrid_models]
+    hybrid_a = model_map[hybrid_models[0]]
+    hybrid_b = model_map[hybrid_models[1]]
+    if "svd" in hybrid_models and hybrid_models[1] == "svd":
+        hybrid_weight = 1.0 - args.hybrid_weight_svd
+    else:
+        hybrid_weight = args.hybrid_weight_svd
 
-    # Lista do finałowego testu
-    models_to_test = [
-        svd_model,
-        n2v_model,
-        hybrid_model
-    ]
+    hybrid_model = HybridRecommender(model_a=hybrid_a, model_b=hybrid_b, weight_a=hybrid_weight)
+
+    if args.model_to_run == "all":
+        models_to_test = [
+            svd_model,
+            knn_model,
+            node2vec_model,
+            hybrid_model,
+        ]
+    elif args.model_to_run == "svd":
+        models_to_test = [svd_model]
+    elif args.model_to_run == "knn":
+        models_to_test = [knn_model]
+    elif args.model_to_run == "node2vec":
+        models_to_test = [node2vec_model]
+    else:  # hybrid
+        models_to_test = [hybrid_model]
 
     # Słownik do przechowywania końcowych wyników dla podsumowania
     all_results = {}
@@ -60,7 +180,7 @@ def main():
         model.fit(train_ratings)
 
         # Ewaluacja na zbiorze testowym
-        metrics = evaluator.evaluate(model, test_ratings, top_k=10)
+        metrics = evaluator.evaluate(model, test_ratings, top_k=args.cutoff)
         all_results[model_name] = metrics
 
     # 6. Czyste podsumowanie wyników w konsoli
@@ -70,6 +190,49 @@ def main():
         for metric_name, value in metrics.items():
             print(f"  {metric_name}: {value:.4f}")
     print("=" * 69)
+
+    # 7. Zapis wyników do pliku CSV dla późniejszej analizy i tuningu
+    os.makedirs("results", exist_ok=True)
+    results_path = os.path.join("results", "tuning_wyniki.csv")
+    file_exists = os.path.isfile(results_path)
+
+    with open(results_path, mode="a", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        if not file_exists:
+            writer.writerow([
+                "Model",
+                "Cutoff",
+                "Dimension",
+                "Walk_Length",
+                "KNN_Mode",
+                "KNN_Neighbors",
+                "KNN_Weights",
+                "SVD_Mode",
+                "Node2Vec_Mode",
+                "HIT",
+                "MRR",
+                "NDCG",
+            ])
+
+        for model_name, metrics in all_results.items():
+            hit_value = next((float(metrics[key]) for key in metrics if "HIT" in key.upper()), 0.0)
+            mrr_value = next((float(metrics[key]) for key in metrics if "MRR" in key.upper()), 0.0)
+            ndcg_value = next((float(metrics[key]) for key in metrics if "NDCG" in key.upper()), 0.0)
+
+            writer.writerow([
+                model_name,
+                args.cutoff,
+                args.dimension,
+                args.walk_length,
+                args.knn_mode,
+                args.knn_neighbors,
+                args.knn_weights,
+                args.svd_mode,
+                args.node2vec_mode,
+                round(hit_value, 4),
+                round(mrr_value, 4),
+                round(ndcg_value, 4),
+            ])
 
 
 if __name__ == "__main__":

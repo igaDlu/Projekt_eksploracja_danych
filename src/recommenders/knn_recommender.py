@@ -7,14 +7,16 @@ from ..models import Rating
 
 
 class KNNRecommender(BaseRecommender):
-    def __init__(self, n_neighbors: int = 5, kind: str = "user") -> None:
+    def __init__(self, n_neighbors: int = 5, weights: str = 'distance', kind: str = "user") -> None:
         """
         n_neighbors: Liczba sąsiadów braku pod uwagę (k z kNN).
+        weights: Sposób ważenia sąsiadów ('uniform' lub 'distance').
         kind: "user" (User-Based Collaborative Filtering) lub "item" (Item-Based).
         """
         super().__init__(kind=kind)
         self.n_neighbors = n_neighbors
-        self.model = NearestNeighbors(metric='cosine', algorithm='brute')
+        self.weights = weights
+        self.model = NearestNeighbors(metric='cosine', algorithm='auto', n_jobs=-1)
         self.pivot_table = None
 
     def fit(self, ratings: List[Rating]) -> None:
@@ -50,7 +52,10 @@ class KNNRecommender(BaseRecommender):
             neighbor_distances = distances.flatten()[1:]
 
             # Zamieniamy odległość (distance) na podobieństwo (similarity)
-            similarities = 1.0 - neighbor_distances
+            if self.weights == 'uniform':
+                similarities = np.ones_like(neighbor_distances)
+            else:
+                similarities = 1.0 - neighbor_distances
 
             if np.sum(similarities) == 0:
                 return 0.0
@@ -72,7 +77,10 @@ class KNNRecommender(BaseRecommender):
             neighbor_indices = self.pivot_table.index[indices.flatten()[1:]]
             neighbor_distances = distances.flatten()[1:]
 
-            similarities = 1.0 - neighbor_distances
+            if self.weights == 'uniform':
+                similarities = np.ones_like(neighbor_distances)
+            else:
+                similarities = 1.0 - neighbor_distances
 
             if np.sum(similarities) == 0:
                 return 0.0
