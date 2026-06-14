@@ -1,6 +1,7 @@
 import networkx as nx
 import random
 import numpy as np
+import multiprocessing
 from typing import List, Tuple
 from gensim.models import Word2Vec
 from .base_recommender import BaseRecommender
@@ -10,12 +11,6 @@ from ..models import Rating
 class Node2VecRecommender(BaseRecommender):
     def __init__(self, dimensions: int = 32, walk_length: int = 10, num_walks: int = 10, window_size: int = 5,
                  kind: str = "user") -> None:
-        """
-        dimensions: Rozmiar wektora embeddingu (np. 32 cechy ukryte).
-        walk_length: Długość jednego błądzenia losowego (ile kroków robi wędrowiec).
-        num_walks: Ile błądzeń losowych zaczynamy z KAŻDEGO węzła w grafie.
-        window_size: Rozmiar okna kontekstu dla Word2Vec.
-        """
         super().__init__(kind=kind)
         self.dimensions = dimensions
         self.walk_length = walk_length
@@ -26,37 +21,38 @@ class Node2VecRecommender(BaseRecommender):
         self.word2vec_model = None
 
     def _generate_random_walks(self) -> List[List[str]]:
-        """Wewnętrzna metoda generująca ścieżki błądzenia losowego po grafie."""
         walks = []
         nodes = list(self.graph.nodes())
+        
+        print(" Przygotowywanie pamięci podręcznej grafu (cache)...")
+        graph_cache = {}
+        for node in nodes:
+            neighbors = list(self.graph.neighbors(node))
+            if neighbors:
+                weights = [float(self.graph[node][nbr].get('weight', 1.0)) for nbr in neighbors]
+                sum_weights = sum(weights)
+                # Bezpieczne mapowanie wag
+                probabilities = [w / sum_weights for w in weights] if sum_weights > 0 else None
+                graph_cache[node] = (neighbors, probabilities)
 
-        # Reprezentujemy węzły jako stringi, bo Word2Vec z biblioteki gensim oczekuje tokenów tekstowych
+        print(f" Generowanie {self.num_walks * len(nodes)} kroków spaceru...")
         for walk_iter in range(self.num_walks):
-            random.shuffle(nodes)  # Tasowanie dla zachowania losowości
+            random.shuffle(nodes)
             for node in nodes:
                 walk = [str(node)]
                 curr_node = node
 
-                # Robimy wędrowanie po krawędziach uwzględniając ich wagi (oceny)
                 for _ in range(self.walk_length - 1):
-                    neighbors = list(self.graph.neighbors(curr_node))
-                    if len(neighbors) == 0:
+                    cache = graph_cache.get(curr_node)
+                    if not cache or not cache[0]:
                         break
-
-                    # Pobieramy wagi krawędzi do sąsiadów, by wędrowiec chętniej szedł w stronę wyższych ocen
-                    weights = [self.graph[curr_node][nbr].get('weight', 1.0) for nbr in neighbors]
-
-                    # Normalizacja wag, by tworzyły rozkład prawdopodobieństwa
-                    sum_weights = sum(weights)
-                    if sum_weights > 0:
-                        probabilities = [w / sum_weights for w in weights]
+                    neighbors, probabilities = cache
+                    
+                    if probabilities is not None:
+                        curr_node = random.choices(neighbors, weights=probabilities, k=1)[0]
                     else:
-                        probabilities = None
-
-                    # Losowy krok z uwzględnieniem prawdopodobieństwa wagowego
-                    next_node = random.choices(neighbors, weights=probabilities, k=1)[0]
-                    walk.append(str(next_node))
-                    curr_node = next_node
+                        curr_node = random.choice(neighbors)
+                    walk.append(str(curr_node))
 
                 walks.append(walk)
         return walks
@@ -68,42 +64,38 @@ class Node2VecRecommender(BaseRecommender):
         for r in ratings:
             u_node = f"u_{r.user_id}"
             b_node = f"b_{r.isbn}"
-
             edge_weight = float(r.rating) if r.rating > 0 else 1.0
-
             self.graph.add_edge(u_node, b_node, weight=edge_weight)
 
         print("Generowanie ścieżek błądzenia losowego (Random Walks)...")
         walks = self._generate_random_walks()
 
         print("Trenowanie modelu Word2Vec na wygenerowanych ścieżkach...")
-        # sg=1 oznacza użycie algorytmu Skip-Gram (serce Node2Vec)
+        cpus = multiprocessing.cpu_count()
+        print(f"  [Użycie procesora: Wykryto {cpus} wątków logicznych dla Word2Vec]")
+
         self.word2vec_model = Word2Vec(
             sentences=walks,
             vector_size=self.dimensions,
             window=self.window_size,
             min_count=1,
             sg=1,
-            workers=4,
+            workers=cpus,
             epochs=5
         )
 
     def predict(self, user_idx: int, item_idx: int) -> float:
         if self.word2vec_model is None:
-            raise ValueError("Model nie został wytrenowany. Wywołaj najpierw fit().")
+            raise ValueError("Model nie został wytrenowany.")
 
         u_node = f"u_{user_idx}"
         b_node = f"b_{item_idx}"
 
-        # Jeśli któregoś węzła nie ma w słowniku embeddingów (zimny start), zwracamy 0.0
         if u_node not in self.word2vec_model.wv or b_node not in self.word2vec_model.wv:
             return 0.0
 
-        # Wyliczamy podobieństwo cosinusowe między wektorem użytkownika a książki.
-        # Wynik jest w przedziale [-1, 1], skalujemy go liniowo do rozdzielczości ocen [0, 1] dla kompatybilności z SVD
         similarity = self.word2vec_model.wv.similarity(u_node, b_node)
-        scaled_score = (similarity + 1.0) / 2.0
-        return float(scaled_score)
+        return float((similarity + 1.0) / 2.0)
 
     def rate(self, user_idx: int, item_idx: int, score: float) -> None:
         if self.graph is not None:
@@ -117,25 +109,37 @@ class Node2VecRecommender(BaseRecommender):
         if u_node not in self.word2vec_model.wv:
             return []
 
-        # Wyciągamy z grafu listę książek, które użytkownik już ocenił
         rated_items = set()
         if self.graph.has_node(u_node):
             for nbr in self.graph.neighbors(u_node):
-                # Odszyfrowujemy ID książki usuwając prefiks 'b_'
-                rated_items.add(int(nbr.replace('b_', '')))
+                rated_items.add(nbr)
 
-        # Szukamy rekomendacji wśród wszystkich unikalnych książek w modelu Word2Vec
-        predictions = []
-        for word in self.word2vec_model.wv.index_to_key:
-            if word.startswith('b_'):
-                item_id = int(word.replace('b_', ''))
-                # Pomijamy pozycje już przeczytane
-                if item_id in rated_items:
-                    continue
+        # KLUCZOWA POPRAWKA: Wymuszamy pobranie znormalizowanego wektora użytkownika
+        user_vector = self.word2vec_model.wv.get_vector(u_node, norm=True)
+        
+        all_keys = self.word2vec_model.wv.index_to_key
+        book_keys = [k for k in all_keys if k.startswith('b_') and k not in rated_items]
+        
+        if not book_keys:
+            return []
 
-                pred_score = self.predict(user_idx, item_id)
-                predictions.append((item_id, pred_score))
+        # KLUCZOWA POPRAWKA: Pobieramy ZNORMALIZOWANE wektory macierzy książek
+        # Dzięki temu @ zadziała dokładnie tak jak wv.similarity() w starym kodzie
+        book_indices = [self.word2vec_model.wv.key_to_index[k] for k in book_keys]
+        book_vectors = self.word2vec_model.wv.get_normed_vectors()[book_indices]
 
-        # Sortujemy ranking malejąco i zwracamy Top-K
-        predictions.sort(key=lambda x: x[1], reverse=True)
-        return predictions[:top_k]
+        # Teraz to jest prawdziwe, czyste podobieństwo cosinusowe w NumPy
+        similarities = book_vectors @ user_vector
+        scaled_scores = (similarities + 1.0) / 2.0
+
+        top_size = min(top_k, len(scaled_scores))
+        top_indices = np.argpartition(-scaled_scores, top_size - 1)[:top_size]
+        top_order = np.argsort(-scaled_scores[top_indices])
+        final_indices = top_indices[top_order]
+
+        ranking = []
+        for idx in final_indices:
+            item_id = int(book_keys[idx].replace('b_', ''))
+            ranking.append((item_id, float(scaled_scores[idx])))
+
+        return ranking

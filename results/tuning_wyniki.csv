@@ -1,0 +1,21 @@
+Model,Cutoff,Dimension,Walk_Length,KNN_Mode,KNN_Neighbors,KNN_Weights,SVD_Mode,Node2Vec_Mode,HIT,MRR,NDCG
+SVDRecommender (item-based),50,16,20,item,20,distance,item,item,0.8562,0.2325,0.1043
+SVDRecommender (item-based),50,100,20,item,20,distance,item,item,0.8047,0.1958,0.0817
+SVDRecommender (item-based),50,300,20,item,20,distance,item,item,0.6009,0.0852,0.0385
+SVDRecommender (user-based),50,16,20,item,20,distance,user,item,0.8541,0.2301,0.1035
+SVDRecommender (user-based),50,100,20,item,20,distance,user,item,0.809,0.195,0.0814
+SVDRecommender (user-based),50,300,20,item,20,distance,user,item,0.5987,0.0836,0.0381
+KNNRecommender (item-based),50,100,20,item,5,uniform,item,item,0.7082,0.1838,0.0732
+KNNRecommender (item-based),50,100,20,item,20,uniform,item,item,0.7296,0.1617,0.0716
+KNNRecommender (item-based),50,100,20,item,20,distance,item,item,0.7704,0.1689,0.0791
+KNNRecommender (item-based),50,100,20,item,50,distance,item,item,0.7532,0.1368,0.0698
+KNNRecommender (user-based),50,100,20,user,5,uniform,item,item,0.7579,0.1779,0.0725
+KNNRecommender (user-based),50,100,20,user,20,uniform,item,item,0.8189,0.2089,0.0951
+KNNRecommender (user-based),50,100,20,user,20,distance,item,item,0.8197,0.2116,0.0952
+KNNRecommender (user-based),50,100,20,user,50,distance,item,item,0.8627,0.2517,0.1104
+Node2VecRecommender (item-based),50,16,20,item,20,distance,item,item,0.7916,0.1616,0.0865
+Node2VecRecommender (item-based),50,100,50,item,20,distance,item,item,0.7579,0.1497,0.0803
+Node2VecRecommender (item-based),50,300,100,item,20,distance,item,item,0.7474,0.147,0.0765
+Node2VecRecommender (user-based),50,16,20,item,20,distance,item,user,0.8021,0.1664,0.0892
+Node2VecRecommender (user-based),50,100,50,item,20,distance,item,user,0.7368,0.1567,0.0784
+Node2VecRecommender (user-based),50,300,100,item,20,distance,item,user,0.7453,0.1518,0.079
