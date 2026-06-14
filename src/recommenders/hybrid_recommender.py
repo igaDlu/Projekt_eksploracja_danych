@@ -6,11 +6,10 @@ from ..models import Rating
 class HybridRecommender(BaseRecommender):
     def __init__(self, model_a: BaseRecommender, model_b: BaseRecommender, weight_a: float = 0.5) -> None:
         """
-        model_a: Pierwszy model (np. SVD)
-        model_b: Drugi model (np. Node2Vec)
+        model_a: Pierwszy model (np. SVD lub Node2Vec)
+        model_b: Drugi model (np. KNN)
         weight_a: Waga dla pierwszego modelu. Waga drugiego to (1.0 - weight_a).
         """
-        # Ustawiamy 'kind' na podstawie pierwszego modelu, żeby zachować spójność trybu
         super().__init__(kind=model_a.kind)
         self.model_a = model_a
         self.model_b = model_b
@@ -25,9 +24,10 @@ class HybridRecommender(BaseRecommender):
 
     def predict(self, user_idx: int, item_idx: int) -> float:
         pred_a = self.model_a.predict(user_idx, item_idx)
+        print(12345)
         pred_b = self.model_b.predict(user_idx, item_idx)
 
-        # WYRÓWNANIE SKALI
+        # WYRÓWNANIE SKALI (Zachowane z Twojego kodu)
         if self.model_a.__class__.__name__ == "Node2VecRecommender":
             pred_a *= 10.0
         if self.model_b.__class__.__name__ == "Node2VecRecommender":
@@ -41,27 +41,34 @@ class HybridRecommender(BaseRecommender):
         self.model_b.rate(user_idx, item_idx, score)
 
     def create_ranking(self, user_idx: int, top_k: int = 10) -> List[Tuple[int, float]]:
-        if not hasattr(self.model_a, 'pivot_table') or self.model_a.pivot_table is None:
+        # --- ZOPTYMALIZOWANE GENEROWANIE RANKINGU HYBRYDOWEGO ---
+        
+        # Pobieramy szerszy kontekst z obu modeli (np. top 200), żeby mieć pewność, 
+        # że znajdziemy wspólne książki do zsumowania
+        candidates_k = max(top_k * 4, 200)
+        
+        ranking_a = self.model_a.create_ranking(user_idx, top_k=candidates_k)
+        ranking_b = self.model_b.create_ranking(user_idx, top_k=candidates_k)
+        
+        if not ranking_a and not ranking_b:
             return []
 
-        if self.kind == "user":
-            if user_idx not in self.model_a.pivot_table.index:
-                return []
-            user_ratings = self.model_a.pivot_table.loc[user_idx]
-            unrated_items = user_ratings[user_ratings == 0].index.tolist()
-        else:
-            if user_idx not in self.model_a.pivot_table.columns:
-                return []
-            user_ratings = self.model_a.pivot_table.loc[:, user_idx]
-            unrated_items = user_ratings[user_ratings == 0].index.tolist()
+        # Słownik na połączone oceny: {isbn: final_score}
+        combined_scores = {}
 
-        # Obliczamy hybrydowe predykcje
-        predictions = []
-        for item_idx in unrated_items:
-            pred_score = self.predict(user_idx, item_idx)
-            if pred_score > 0.0:
-                predictions.append((item_idx, pred_score))
+        # Mnożnik skali dla Node2Vec
+        scale_a = 10.0 if self.model_a.__class__.__name__ == "Node2VecRecommender" else 1.0
+        scale_b = 10.0 if self.model_b.__class__.__name__ == "Node2VecRecommender" else 1.0
 
-        # Sortujemy malejąco
-        predictions.sort(key=lambda x: x[1], reverse=True)
+        # Przetwarzamy wyniki z modelu A
+        for item_idx, score in ranking_a:
+            combined_scores[item_idx] = combined_scores.get(item_idx, 0.0) + (score * scale_a * self.weight_a)
+
+        # Przetwarzamy wyniki z modelu B
+        for item_idx, score in ranking_b:
+            combined_scores[item_idx] = combined_scores.get(item_idx, 0.0) + (score * scale_b * self.weight_b)
+
+        # Sortujemy połączone wyniki malejąco
+        predictions = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
+        
         return predictions[:top_k]
